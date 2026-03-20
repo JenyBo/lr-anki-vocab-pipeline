@@ -1,5 +1,7 @@
 {
+  "type": "module",
   "dependencies": {
+    "anki-apkg-export": "^4.0.3",
     "node-fetch": "^3.3.2"
   }
 }

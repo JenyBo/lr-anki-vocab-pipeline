@@ -2,6 +2,14 @@
 // It will log and copy words to clipboard
 
 (async () => {
+  // Optional configuration (set these before running the snippet):
+  // - window.LR_MIN_RANK: number (default 8000)
+  // - window.LR_SERVER_URL: string like "http://127.0.0.1:4567/words"
+  // - window.LR_YOUTUBE_URL: string (optional, for logging)
+  const MIN_RANK = Number(window.LR_MIN_RANK ?? 8000);
+  const SERVER_URL = typeof window.LR_SERVER_URL === 'string' ? window.LR_SERVER_URL : '';
+  const YOUTUBE_URL = typeof window.LR_YOUTUBE_URL === 'string' ? window.LR_YOUTUBE_URL : '';
+
   console.log("📚 Extracting words from Language Reactor...");
 
   const raw = [];
@@ -12,7 +20,7 @@
     if (!match) return;
 
     const rank = parseInt(match[1]);
-    if (rank < 8000) return; // Adjust range as needed
+    if (rank < MIN_RANK) return;
 
     const container = h4.nextElementSibling;
     if (!container) return;
@@ -31,8 +39,18 @@
   console.log(`✅ Extracted ${words.length} unique words:`);
   console.log(words.join('\n'));
 
-  // Copy to clipboard
-  const text = words.join('\n');
-  await navigator.clipboard.writeText(text);
-  console.log("📋 Words copied to clipboard! Paste into word_list.txt");
+  if (SERVER_URL) {
+    // Send to local Node runner for fully automated export.
+    const resp = await fetch(SERVER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ words, youtubeUrl: YOUTUBE_URL })
+    });
+    console.log("📡 Server response:", await resp.text());
+  } else {
+    // Copy to clipboard (original workflow).
+    const text = words.join('\n');
+    await navigator.clipboard.writeText(text);
+    console.log("📋 Words copied to clipboard! Paste into word_list.txt");
+  }
 })();

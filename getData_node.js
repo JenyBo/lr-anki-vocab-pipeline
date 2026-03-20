@@ -104,19 +104,6 @@ import fs from 'fs';
     return strongRejections.some(pattern => usageLower.includes(pattern));
   }
 
-  // ===== MINIMAL TECH TERMS WHITELIST =====
-  // Only for words that might not be caught by LLM validation
-  const minimalWhitelist = new Set([
-    'json', 'api', 'apis',           // APIs
-    'serialization', 'deserialization', // Data format
-    'nullable', 'nullability',       // Type system
-    'accessor',                       // OOP
-    'jvm',                           // Java specific
-    'untyped',                       // Type systems
-    'exhaustiveness',                // Compiler terms
-    'syntactically',                 // Grammar
-  ]);
-
   // ===== API =====
   async function getMeaning(word) {
     try {
@@ -207,7 +194,7 @@ Trả về JSON:`;
     return;
   }
 
-  const words = [...new Set(raw)].slice(0, 50);
+  const words = [...new Set(raw)].slice(0, 100);
   console.log(`📊 Words extracted: ${words.length}`);
 
   // ===== VALIDATE & GET DATA IN ONE PASS =====

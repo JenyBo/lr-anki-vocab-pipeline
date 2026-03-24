@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>AI Worker Lab v3</title>
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --danger: #d93025;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f8f9fa;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .app-card {
+            background: white;
+            width: 100%;
+            max-width: 800px;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        /* Modal Style */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .modal-btns {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .setup-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: #f1f3f4;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        select {
+            flex: 1;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+        }
+
+        .status-tag {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 10px;
+        }
+
+        .status-none {
+            background: #eee;
+            color: #666;
+        }
+
+        .status-offline {
+            background: #e6f4ea;
+            color: #1e8e3e;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-blue {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-red {
+            background: white;
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            margin-top: 15px;
+            padding: 10px;
+            box-sizing: border-box;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-card">
+        <h2>AI Translator Lab v3</h2>
+
+        <div class="setup-row">
+            <select id="modelSelect">
+                <option value="Xenova/opus-mt-en-vi">Helsinki-MT (150MB)</option>
+                <option value="Xenova/nllb-200-distilled-600M">NLLB-200 (600MB)</option>
+            </select>
+            <span id="modelStatus" class="status-tag status-none">Đang kiểm tra...</span>
+            <button class="btn btn-blue" id="loadBtn">Nạp AI</button>
+            <button class="btn btn-red" id="delBtn">Xóa</button>
+        </div>
+
+        <div id="progBar" style="height:4px; background:#ddd; margin-top:10px; display:none">
+            <div id="progFill" style="height:100%; background:var(--primary); width:0%"></div>
+        </div>
+
+        <textarea id="input" placeholder="Nhập tiếng Anh..."></textarea>
+        <button class="btn btn-blue" id="transBtn" disabled style="width:100%; margin-top:10px">DỊCH</button>
+        <textarea id="output" readonly placeholder="Kết quả..."></textarea>
+    </div>
+
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h3 id="modalTitle">Thông báo</h3>
+            <p id="modalMsg">Bạn có chắc chắn muốn thực hiện?</p>
+            <div class="modal-btns">
+                <button class="btn" onclick="closeModal()">Hủy</button>
+                <button class="btn btn-blue" id="confirmBtn">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const worker = new Worker('worker.js', { type: 'module' });
+        const sel = document.getElementById('modelSelect');
+        const st = document.getElementById('modelStatus');
+        const overlay = document.getElementById('modalOverlay');
+        let confirmAction = null;
+
+        // --- LOGIC KIỂM TRA (SỬA LỖI 2) ---
+        function checkModel() {
+            st.className = "status-tag status-none";
+            st.innerText = "Đang kiểm tra kho lưu trữ...";
+            worker.postMessage({ action: 'check', modelPath: sel.value });
+        }
+
+        // Kiểm tra ngay khi load trang và khi đổi select
+        sel.onchange = checkModel;
+        // Đợi worker khởi động xong một chút rồi check
+        setTimeout(checkModel, 200);
+
+        // --- LOGIC XÓA (SỬA LỖI 3) ---
+        document.getElementById('delBtn').onclick = () => {
+            const modelName = sel.value;
+            showModal("Xác nhận", `Xóa triệt để các tệp của ${modelName}?`, async () => {
+                const cacheNames = await caches.keys();
+                let totalDeleted = 0;
+
+                for (const name of cacheNames) {
+                    const cache = await caches.open(name);
+                    const keys = await cache.keys();
+                    for (const request of keys) {
+                        // Kiểm tra không phân biệt hoa thường và khớp chuỗi model
+                        if (request.url.toLowerCase().includes(modelName.toLowerCase())) {
+                            await cache.delete(request);
+                            totalDeleted++;
+                        }
+                    }
+                }
+
+                showModal("Thành công", `Đã xóa ${totalDeleted} tệp liên quan.`, () => {
+                    // Ép buộc xóa sạch hoàn toàn RAM và reload
+                    location.reload();
+                });
+            });
+        };
+
+        // --- CÁC LOGIC KHÁC ---
+        document.getElementById('loadBtn').onclick = () => {
+            document.getElementById('progBar').style.display = 'block';
+            worker.postMessage({ action: 'load', modelPath: sel.value });
+        };
+
+        document.getElementById('transBtn').onclick = () => {
+            const text = document.getElementById('input').value;
+            if (!text) return;
+            worker.postMessage({ action: 'translate', text, modelPath: sel.value });
+        };
+
+        worker.onmessage = (e) => {
+            const d = e.data;
+            if (d.status === 'check-result') {
+                if (d.exists) {
+                    st.className = "status-tag status-offline";
+                    st.innerText = "Đã tải (Sẵn sàng Offline)";
+                } else {
+                    st.className = "status-tag status-none";
+                    st.innerText = "Chưa tải (Cần Internet)";
+                }
+            }
+            if (d.status === 'ready') {
+                document.getElementById('transBtn').disabled = false;
+                st.innerText = d.device === 'cpu' ? "Đã nạp (Chạy bằng CPU)" : "Đã nạp (WebGPU Sẵn sàng)";
+                document.getElementById('progBar').style.display = 'none';
+            }
+            if (d.status === 'result') {
+                document.getElementById('output').value = d.output;
+            }
+            if (d.status === 'error') {
+                showModal("Lỗi xử lý", d.message, () => { });
+            }
+        };
+
+        // Modal helpers
+        window.showModal = (title, msg, action) => {
+            document.getElementById('modalTitle').innerText = title;
+            document.getElementById('modalMsg').innerText = msg;
+            confirmAction = action || closeModal;
+            overlay.style.display = 'flex';
+        };
+        window.closeModal = () => overlay.style.display = 'none';
+        document.getElementById('confirmBtn').onclick = () => { confirmAction(); closeModal(); };
+    </script>
+</body>
+
+</html>

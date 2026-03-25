@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "LR Vocab Exporter",
+  "version": "1.0.0",
+  "description": "Extract vocabulary from YouTube videos with Language Reactor and export to Anki/Quizlet",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://api-cdn-plus.dioco.io/*",
+    "https://api-cdn.dioco.io/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "128": "icons/language-learning.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://www.languagereactor.com/*"],
+      "js": ["token_capture.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["token_hook.js"],
+      "matches": ["*://www.languagereactor.com/*"]
+    }
+  ],
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}

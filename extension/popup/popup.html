@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>LR Vocab Exporter</h1>
+
+  <div id="tokenStatus" class="help" style="margin-bottom:12px">
+    Token status: <span id="tokenStatusText">loading...</span>
+  </div>
+
+  <div id="tokenWarning" class="hidden">
+    <div class="help" style="margin-bottom:10px">
+      We couldn't capture Language Reactor <code>diocoToken</code> automatically.
+      Please log in once at <code>languagereactor.com</code> (keep the page open), then try again.
+      If it still doesn't work, paste the token below.
+    </div>
+    <div class="field" style="margin-bottom:8px">
+      <label for="tokenInput">Paste diocoToken</label>
+      <input type="password" id="tokenInput" placeholder="diocoToken..." />
+    </div>
+    <button id="btnSaveToken" style="margin-top:0">Save token</button>
+  </div>
+
+  <div class="field">
+    <label for="rankMode">Rank filter</label>
+    <select id="rankMode">
+      <option value="gte" selected>Greater than or equal (>=)</option>
+      <option value="range">In range (min to max)</option>
+      <option value="lte">Smaller than or equal (<=)</option>
+    </select>
+    <div class="help" id="rankHelp">Pick a filter type. “Range” shows both Min and Max.</div>
+  </div>
+
+  <div class="field" id="minRankField">
+    <label for="minRank">Min Rank</label>
+    <input type="number" id="minRank" value="8000" min="0" step="100">
+  </div>
+
+  <div class="field" id="maxRankField">
+    <label for="maxRank">Max Rank</label>
+    <input type="number" id="maxRank" value="8000" min="0" step="100">
+  </div>
+
+  <div class="field">
+    <label for="maxWords">Max Words</label>
+    <input type="number" id="maxWords" value="200" min="1" max="500">
+  </div>
+
+  <button id="btnExtract">Extract &amp; Export</button>
+
+  <div id="progress" class="hidden">
+    <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+    <p id="statusText">Waiting...</p>
+  </div>
+
+  <div id="results" class="hidden">
+    <p id="summary"></p>
+    <div id="downloads"></div>
+  </div>
+
+  <div id="error" class="hidden"></div>
+
+  <script src="../dist/popup.bundle.js"></script>
+</body>
+</html>

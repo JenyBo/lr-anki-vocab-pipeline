@@ -12,6 +12,13 @@ let TOKEN = '';
 const BATCH_SIZE = 3;
 const BASE_DELAY = 1000;
 const AUDIO_LANG = 'en';
+const MEANING_CACHE_KEY = 'meaningCacheV1';
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAX_MEANING_CACHE_ENTRIES = 800;
+const AUDIO_DB_NAME = 'lrAudioCacheDb';
+const AUDIO_DB_VERSION = 1;
+const AUDIO_STORE = 'audio';
+const MAX_AUDIO_CACHE_ENTRIES = 800;
 
 // ===== DOM REFS =====
 const btnExtract = document.getElementById('btnExtract');
@@ -40,6 +47,144 @@ function storageGet(keys) {
 function storageSet(obj) {
   return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
 }
+
+let meaningCache = {};
+let cacheFlushTimer = null;
+let audioDb = null;
+
+function nowMs() {
+  return Date.now();
+}
+
+function isFresh(entry) {
+  return entry && typeof entry.ts === 'number' && nowMs() - entry.ts <= CACHE_TTL_MS;
+}
+
+function pruneCacheObject(obj, maxEntries) {
+  const entries = Object.entries(obj);
+  if (entries.length <= maxEntries) return obj;
+  entries.sort((a, b) => (b[1]?.ts || 0) - (a[1]?.ts || 0));
+  return Object.fromEntries(entries.slice(0, maxEntries));
+}
+
+async function loadCaches() {
+  try {
+    const stored = await storageGet([MEANING_CACHE_KEY]);
+    const mc = stored?.[MEANING_CACHE_KEY];
+    meaningCache = (mc && typeof mc === 'object') ? mc : {};
+  } catch {
+    meaningCache = {};
+  }
+}
+
+function scheduleCacheFlush() {
+  if (cacheFlushTimer) return;
+  cacheFlushTimer = setTimeout(async () => {
+    cacheFlushTimer = null;
+    try {
+      meaningCache = pruneCacheObject(meaningCache, MAX_MEANING_CACHE_ENTRIES);
+      await storageSet({
+        [MEANING_CACHE_KEY]: meaningCache,
+      });
+    } catch {
+      // Ignore quota/write errors; app still works without persistence.
+    }
+  }, 400);
+}
+
+function storageRemove(keys) {
+  return new Promise((resolve) => chrome.storage.local.remove(keys, resolve));
+}
+
+async function migrateLegacyAudioCache() {
+  try {
+    await storageRemove(['audioCacheV1']);
+  } catch {
+    // Ignore migration failures.
+  }
+}
+
+function openAudioDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(AUDIO_DB_NAME, AUDIO_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(AUDIO_STORE)) {
+        db.createObjectStore(AUDIO_STORE, { keyPath: 'word' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('Failed to open audio cache DB'));
+  });
+}
+
+function idbReq(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbTxDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+  });
+}
+
+async function getAudioFromDb(word) {
+  if (!audioDb) return null;
+  try {
+    const tx = audioDb.transaction(AUDIO_STORE, 'readonly');
+    const entry = await idbReq(tx.objectStore(AUDIO_STORE).get(word));
+    if (!isFresh(entry) || !(entry?.buf instanceof ArrayBuffer)) return null;
+    return new Uint8Array(entry.buf);
+  } catch {
+    return null;
+  }
+}
+
+async function putAudioToDb(word, bytes) {
+  if (!audioDb || !bytes) return;
+  try {
+    const tx = audioDb.transaction(AUDIO_STORE, 'readwrite');
+    const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    tx.objectStore(AUDIO_STORE).put({ word, ts: nowMs(), buf: copy });
+    await idbTxDone(tx);
+  } catch {
+    // Ignore write failures.
+  }
+}
+
+async function pruneAudioDb() {
+  if (!audioDb) return;
+  try {
+    const tx = audioDb.transaction(AUDIO_STORE, 'readonly');
+    const all = await idbReq(tx.objectStore(AUDIO_STORE).getAll());
+    if (!Array.isArray(all) || all.length === 0) return;
+
+    const fresh = all.filter((entry) => isFresh(entry));
+    fresh.sort((a, b) => (b?.ts || 0) - (a?.ts || 0));
+    const keep = new Set(fresh.slice(0, MAX_AUDIO_CACHE_ENTRIES).map((entry) => entry.word));
+
+    const cleanupTx = audioDb.transaction(AUDIO_STORE, 'readwrite');
+    const store = cleanupTx.objectStore(AUDIO_STORE);
+    for (const entry of all) {
+      if (!keep.has(entry.word)) store.delete(entry.word);
+    }
+    await idbTxDone(cleanupTx);
+  } catch {
+    // Ignore prune failures.
+  }
+}
+
+const cacheInitPromise = (async () => {
+  await migrateLegacyAudioCache();
+  await loadCaches();
+  audioDb = await openAudioDb();
+  await pruneAudioDb();
+})();
 
 function setTokenStatus(text, tone) {
   if (!tokenStatusText) return;
@@ -219,13 +364,24 @@ if (rankModeSelect) {
 // ===== API CALLS =====
 
 async function getMeaning(word) {
+  await cacheInitPromise;
+  const key = word.toLowerCase();
+  const cached = meaningCache[key];
+  if (isFresh(cached) && typeof cached.value === 'string') {
+    return cached.value;
+  }
   try {
     const res = await fetch(
       `https://api-cdn-plus.dioco.io/base_dict_getHoverDict_8?form=${word}&lemma=&sl=en&tl=vi&pos=ANY&pow=n`
     );
     const data = await res.json();
-    return data?.data?.hoverDictEntries?.join(', ') || '';
-  } catch { return ''; }
+    const meaning = data?.data?.hoverDictEntries?.join(', ') || '';
+    meaningCache[key] = { value: meaning, ts: nowMs() };
+    scheduleCacheFlush();
+    return meaning;
+  } catch {
+    return '';
+  }
 }
 
 async function getUsageBatch(words, retry = 0) {
@@ -280,6 +436,12 @@ function base64ToUint8Array(base64) {
 }
 
 async function getAudioLR(word) {
+  await cacheInitPromise;
+  const key = word.toLowerCase();
+  const cachedBytes = await getAudioFromDb(key);
+  if (cachedBytes) {
+    return cachedBytes;
+  }
   try {
     const res = await fetch(
       `https://api-cdn-plus.dioco.io/base_dict_getDictTTS_3?lang=${AUDIO_LANG}&text=${encodeURIComponent(word)}`
@@ -289,7 +451,9 @@ async function getAudioLR(word) {
     if (!uri || typeof uri !== 'string') return null;
     const idx = uri.indexOf('base64,');
     if (idx === -1) return null;
-    return base64ToUint8Array(uri.slice(idx + 7));
+    const bytes = base64ToUint8Array(uri.slice(idx + 7));
+    await putAudioToDb(key, bytes);
+    return bytes;
   } catch { return null; }
 }
 
